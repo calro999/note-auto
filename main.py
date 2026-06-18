@@ -159,15 +159,26 @@ def post_to_note_via_playwright(title, content):
             page.screenshot(path="step3_after_typing.png", full_page=True)
             
             print("公開ボタンを押下中...")
-            # スクロールを一番上に戻す（ボタンがヘッダーにある場合を考慮）
+            # ページをスクロールしながら公開ボタンを探す
             page.evaluate("window.scrollTo(0, 0)")
             time.sleep(1)
             
-            # ボタン名が「公開設定」「公開」「投稿する」「公開に進む」などのパターンに広く対応
-            publish_settings_btn = page.locator('text="公開に進む", text="公開設定", text="公開する", text="公開", text="投稿する"').locator('visible=true').first
+            btn_found = False
+            for _ in range(15): # 最大15回スクロールしながら探す
+                # 多様なボタン名に対応
+                publish_settings_btn = page.locator('text="公開に進む", text="公開設定", text="公開する", text="公開", text="投稿する"').locator('visible=true').first
+                
+                if publish_settings_btn.count() > 0:
+                    publish_settings_btn.click(force=True)
+                    btn_found = True
+                    print("最初の公開ボタンを発見してクリックしました！")
+                    break
+                
+                # 見つからなければ下にスクロール
+                page.mouse.wheel(0, 800)
+                time.sleep(1)
             
-            if publish_settings_btn.count() > 0:
-                publish_settings_btn.click(force=True)
+            if btn_found:
                 time.sleep(3)
                 page.screenshot(path="step4_publish_settings.png", full_page=True)
                 
@@ -182,7 +193,10 @@ def post_to_note_via_playwright(title, content):
                 time.sleep(5)
                 page.screenshot(path="step5_after_publish.png", full_page=True)
             else:
-                print("最初の公開設定ボタンが見つかりませんでした。画面の状態を確認してください。")
+                print("最初の公開ボタンが見つかりませんでした。画面の状態を確認してください。")
+                # ボタンが見つからず失敗した場合でも、noteの下書き自動保存が走るように10秒待機する
+                print("下書き保存のため10秒待機します...")
+                time.sleep(10)
 
         except Exception as e:
             print(f"Playwright操作中にエラーが発生しました: {e}")
