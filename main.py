@@ -63,7 +63,8 @@ def generate_article(theme):
     start_time = time.time()
     
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=300)
+        # qwen2.5:3bは重く、GitHubの無料サーバー(CPU)で長文を生成すると5分(300秒)以上かかるためタイムアウトを30分(1800秒)に延長
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=1800)
         response.raise_for_status()
         result = response.json()
         text = result.get("response", "")
