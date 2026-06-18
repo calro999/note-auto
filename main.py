@@ -96,12 +96,15 @@ def post_to_note_via_playwright(title, content):
             
             # 2. 認証情報の入力
             print("ログイン情報を入力中...")
-            # noteのログインフォームに合わせてセレクタを指定（変更される可能性があります）
-            page.fill('input[type="email"], input[name="login"]', NOTE_EMAIL)
-            page.fill('input[type="password"], input[name="password"]', NOTE_PASSWORD)
+            # noteのログインフォームに合わせてセレクタを指定
+            page.fill('#email', NOTE_EMAIL)
+            page.fill('#password', NOTE_PASSWORD)
             
-            # ログインボタンをクリック
-            page.click('button[type="submit"], button:has-text("ログイン")')
+            # ログインボタンをクリック（disabledが外れるまで待機してからクリック）
+            login_btn = page.locator('.o-login__button button')
+            login_btn.wait_for(state="visible")
+            page.wait_for_timeout(1000) # 有効化されるまで少し待機
+            login_btn.click(force=True)
             
             # ログイン完了を待機（ダッシュボード等の要素が現れるまで、あるいはURLが変わるまで）
             page.wait_for_load_state("networkidle")
