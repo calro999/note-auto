@@ -1,13 +1,14 @@
 import os
-import json
 import random
 import requests
 import time
+from playwright.sync_api import sync_playwright
 
 # --- 設定 ---
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-WEBHOOK_URL = os.environ.get("MAKE_WEBHOOK_URL")
-MODEL_NAME = "gemma2:2b" # GitHub Actionsで動く軽量かつ優秀なモデルを想定
+NOTE_EMAIL = os.environ.get("NOTE_EMAIL")
+NOTE_PASSWORD = os.environ.get("NOTE_PASSWORD")
+MODEL_NAME = "gemma2:2b"
 
 # ランダムなテーマのリスト
 THEMES = [
@@ -27,7 +28,6 @@ THEMES = [
 
 def generate_article(theme):
     """Ollama APIを使用して記事を生成する"""
-    
     system_prompt = """あなたは、恋愛に悩む18〜35歳の女性に向けた恋愛アドバイザーです。
 以下のキャラクター設定を守って記事を書いてください。
 
@@ -51,7 +51,7 @@ def generate_article(theme):
         "prompt": prompt,
         "stream": False,
         "options": {
-            "num_predict": 4096, # 生成トークン数の上限を増やす
+            "num_predict": 4096,
             "temperature": 0.7
         }
     }
@@ -60,7 +60,7 @@ def generate_article(theme):
     start_time = time.time()
     
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=300) # 最大5分待ち
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=300)
         response.raise_for_status()
         result = response.json()
         text = result.get("response", "")
@@ -73,42 +73,109 @@ def generate_article(theme):
         print(f"記事生成中にエラーが発生しました: {e}")
         return None
 
-def send_to_make(title, content):
-    """MakeのWebhookへデータを送信する"""
-    if not WEBHOOK_URL:
-        print("エラー: MAKE_WEBHOOK_URL が設定されていません。")
-        return False
-        
-    payload = {
-        "title": title,
-        "content": content
-    }
-    
-    try:
-        response = requests.post(WEBHOOK_URL, json=payload)
-        response.raise_for_status()
-        print("Makeへの送信が成功しました！")
-        return True
-    except Exception as e:
-        print(f"Makeへの送信中にエラーが発生しました: {e}")
+def post_to_note_via_playwright(title, content):
+    """Playwrightを使ってnoteにログインし、記事を投稿する"""
+    if not NOTE_EMAIL or not NOTE_PASSWORD:
+        print("エラー: NOTE_EMAIL または NOTE_PASSWORD が設定されていません。")
         return False
 
+    print("noteへの自動投稿プロセスを開始します...")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        # Bot検知を少しでも回避するための設定
+        context = browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        page = context.new_page()
+        
+        try:
+            # 1. ログインページへアクセス
+            print("ログインページへアクセス中...")
+            page.goto("https://note.com/login")
+            page.wait_for_load_state("networkidle")
+            
+            # 2. 認証情報の入力
+            print("ログイン情報を入力中...")
+            # noteのログインフォームに合わせてセレクタを指定（変更される可能性があります）
+            page.fill('input[type="email"], input[name="login"]', NOTE_EMAIL)
+            page.fill('input[type="password"], input[name="password"]', NOTE_PASSWORD)
+            
+            # ログインボタンをクリック
+            page.click('button[type="submit"], button:has-text("ログイン")')
+            
+            # ログイン完了を待機（ダッシュボード等の要素が現れるまで、あるいはURLが変わるまで）
+            page.wait_for_load_state("networkidle")
+            time.sleep(3) # 念のため待機
+            
+            # 3. 記事作成ページへアクセス
+            print("記事作成ページへアクセス中...")
+            page.goto("https://note.com/intent/post")
+            page.wait_for_load_state("networkidle")
+            time.sleep(2) # エディタの初期化待ち
+            
+            # 4. タイトルと本文の入力
+            print("タイトルと本文を入力中...")
+            # タイトルの入力（プレースホルダーやクラス名で要素を探す）
+            title_input = page.locator('textarea[placeholder*="タイトル"], .editor-titleInput')
+            if title_input.count() > 0:
+                title_input.first.fill(title)
+            else:
+                # 見つからない場合は強制的に最初の入力可能領域にタイプする
+                page.keyboard.type(title)
+                page.keyboard.press("Enter")
+            
+            time.sleep(1)
+            
+            # 本文の入力（ProseMirrorエディタの領域）
+            body_input = page.locator('.ProseMirror, [contenteditable="true"]').last
+            if body_input.count() > 0:
+                body_input.click()
+                page.keyboard.insert_text(content)
+            else:
+                page.keyboard.press("Tab")
+                page.keyboard.insert_text(content)
+            
+            time.sleep(2)
+            
+            # 5. 公開処理
+            print("公開ボタンを押下中...")
+            # 「公開設定」ボタン
+            publish_settings_btn = page.locator('button:has-text("公開設定")')
+            if publish_settings_btn.count() > 0:
+                publish_settings_btn.first.click()
+                time.sleep(2)
+                
+                # 「投稿する」ボタン
+                submit_btn = page.locator('button:has-text("投稿する"), button:has-text("公開")').last
+                submit_btn.click()
+                print("noteへの投稿が完了しました！")
+                
+                # 投稿完了画面が表示されるまで待機
+                time.sleep(5)
+            else:
+                print("公開設定ボタンが見つかりませんでした。下書きとして保存されている可能性があります。")
+
+        except Exception as e:
+            print(f"Playwright操作中にエラーが発生しました: {e}")
+            # エラー時の状況確認のためにスクリーンショットを保存
+            page.screenshot(path="error_screenshot.png")
+            print("エラー発生時のスクリーンショットを 'error_screenshot.png' に保存しました。")
+        finally:
+            browser.close()
+
 def main():
-    # テーマをランダムに選択
     theme = random.choice(THEMES)
     
-    # 記事を生成
     full_text = generate_article(theme)
     if not full_text:
         return
         
-    # 最初の行をタイトル、それ以降を本文として分割
     lines = full_text.strip().split('\n')
-    title = lines[0].strip('#').strip() # 見出し記号がついていた場合のために除去
+    title = lines[0].strip('#').strip()
     content = '\n'.join(lines[1:]).strip()
     
-    # Webhookへ送信
-    send_to_make(title, content)
+    # Playwrightで直接投稿
+    post_to_note_via_playwright(title, content)
 
 if __name__ == "__main__":
     main()

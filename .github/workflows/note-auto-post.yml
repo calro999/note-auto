@@ -2,9 +2,8 @@ name: Auto Post to Note
 
 on:
   schedule:
-    # 毎日 日本時間の20:00 (UTCの11:00) に実行
     - cron: '0 11 * * *'
-  workflow_dispatch: # 手動実行用トリガー
+  workflow_dispatch:
 
 jobs:
   generate-and-post:
@@ -23,13 +22,15 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Install Playwright browsers
+        run: playwright install --with-deps chromium
+
       - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
 
       - name: Start Ollama Server
         run: |
           ollama serve &
-          # サーバーが立ち上がるまで少し待機
           sleep 10
           
       - name: Pull LLM Model
@@ -37,5 +38,14 @@ jobs:
 
       - name: Run Python Script
         env:
-          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+          NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
+          NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
         run: python main.py
+
+      - name: Upload Error Screenshot (if any)
+        if: failure() || always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-error-screenshot
+          path: error_screenshot.png
+          if-no-files-found: ignore
