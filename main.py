@@ -82,54 +82,56 @@ def post_to_note_via_playwright(title, content):
     print("noteへの自動投稿プロセスを開始します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # Bot検知を少しでも回避するための設定
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
         
         try:
-            # 1. ログインページへアクセス
             print("ログインページへアクセス中...")
             page.goto("https://note.com/login")
             page.wait_for_load_state("networkidle")
             
-            # 2. 認証情報の入力
             print("ログイン情報を入力中...")
-            # noteのログインフォームに合わせてセレクタを指定
             page.fill('#email', NOTE_EMAIL)
             page.fill('#password', NOTE_PASSWORD)
             
-            # ログインボタンをクリック（disabledが外れるまで待機してからクリック）
             login_btn = page.locator('.o-login__button button')
             login_btn.wait_for(state="visible")
-            page.wait_for_timeout(1000) # 有効化されるまで少し待機
+            page.wait_for_timeout(1000)
             login_btn.click(force=True)
             
-            # ログイン完了を待機（ダッシュボード等の要素が現れるまで、あるいはURLが変わるまで）
+            print("ログイン完了を待機中...")
+            # URLがloginページから変わるか、5秒経過するまで待機
+            try:
+                page.wait_for_url(lambda url: "login" not in url, timeout=10000)
+            except Exception:
+                pass # タイムアウトしてもとりあえず次へ進む（エラーハンドリングは後で）
+                
             page.wait_for_load_state("networkidle")
-            time.sleep(3) # 念のため待機
+            time.sleep(2)
+            page.screenshot(path="step1_after_login.png") # デバッグ用スクショ
             
-            # 3. 記事作成ページへアクセス
+            if "login" in page.url:
+                print("エラー: ログイン画面から遷移していません。認証失敗かBot検知の可能性があります。")
+                return False
+
             print("記事作成ページへアクセス中...")
             page.goto("https://note.com/intent/post")
             page.wait_for_load_state("networkidle")
-            time.sleep(2) # エディタの初期化待ち
+            time.sleep(3)
+            page.screenshot(path="step2_editor_loaded.png") # デバッグ用スクショ
             
-            # 4. タイトルと本文の入力
             print("タイトルと本文を入力中...")
-            # タイトルの入力（プレースホルダーやクラス名で要素を探す）
             title_input = page.locator('textarea[placeholder*="タイトル"], .editor-titleInput')
             if title_input.count() > 0:
                 title_input.first.fill(title)
             else:
-                # 見つからない場合は強制的に最初の入力可能領域にタイプする
                 page.keyboard.type(title)
                 page.keyboard.press("Enter")
             
             time.sleep(1)
             
-            # 本文の入力（ProseMirrorエディタの領域）
             body_input = page.locator('.ProseMirror, [contenteditable="true"]').last
             if body_input.count() > 0:
                 body_input.click()
@@ -138,31 +140,30 @@ def post_to_note_via_playwright(title, content):
                 page.keyboard.press("Tab")
                 page.keyboard.insert_text(content)
             
-            time.sleep(2)
+            time.sleep(3)
+            page.screenshot(path="step3_after_typing.png") # デバッグ用スクショ
             
-            # 5. 公開処理
             print("公開ボタンを押下中...")
-            # 「公開設定」ボタン
-            publish_settings_btn = page.locator('button:has-text("公開設定")')
+            # noteのエディタの「公開設定」ボタンのセレクタ（idやクラスを幅広く拾う）
+            publish_settings_btn = page.locator('button:has-text("公開設定"), button[data-name="publish"]')
             if publish_settings_btn.count() > 0:
                 publish_settings_btn.first.click()
                 time.sleep(2)
+                page.screenshot(path="step4_publish_settings.png") # デバッグ用スクショ
                 
-                # 「投稿する」ボタン
-                submit_btn = page.locator('button:has-text("投稿する"), button:has-text("公開")').last
+                submit_btn = page.locator('button:has-text("投稿する"), button:has-text("公開"), button[data-name="publish-submit"]').last
                 submit_btn.click()
-                print("noteへの投稿が完了しました！")
+                print("noteへの投稿完了ボタンを押しました！")
                 
-                # 投稿完了画面が表示されるまで待機
                 time.sleep(5)
+                page.screenshot(path="step5_after_publish.png") # デバッグ用スクショ
             else:
-                print("公開設定ボタンが見つかりませんでした。下書きとして保存されている可能性があります。")
+                print("公開設定ボタンが見つかりませんでした。画面の状態を確認してください。")
 
         except Exception as e:
             print(f"Playwright操作中にエラーが発生しました: {e}")
-            # エラー時の状況確認のためにスクリーンショットを保存
             page.screenshot(path="error_screenshot.png")
-            print("エラー発生時のスクリーンショットを 'error_screenshot.png' に保存しました。")
+            print("エラー発生時のスクリーンショットを保存しました。")
         finally:
             browser.close()
 

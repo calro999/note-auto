@@ -42,10 +42,10 @@ jobs:
           NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
         run: python main.py
 
-      - name: Upload Error Screenshot (if any)
+      - name: Upload Debug Screenshots
         if: failure() || always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-error-screenshot
-          path: error_screenshot.png
+          name: playwright-debug-screenshots
+          path: "*.png"
           if-no-files-found: ignore
