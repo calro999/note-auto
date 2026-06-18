@@ -1,8 +1,7 @@
 import os
-import random
+import json
 import requests
 import time
-import json
 from playwright.sync_api import sync_playwright
 
 # --- 設定 ---
@@ -11,109 +10,177 @@ NOTE_EMAIL = os.environ.get("NOTE_EMAIL")
 NOTE_PASSWORD = os.environ.get("NOTE_PASSWORD")
 NOTE_COOKIES = os.environ.get("NOTE_COOKIES")
 MODEL_NAME = "qwen2.5:3b"
+THEMES_FILE = "used_themes.json"
 
-# ランダムなテーマのリスト
-THEMES = [
-    "出会いがない社会人のための自然な恋の始め方",
-    "LINEの返信が遅い彼氏の心理と、焦らないための心の持ち方",
-    "「都合のいい女」から本命の彼女に昇格するためのステップ",
-    "過去の恋愛のトラウマを乗り越えて、新しい恋に踏み出す方法",
-    "職場恋愛で周りにバレずに愛を育むコツと注意点",
-    "マッチングアプリで「会ってみたい」と思わせるプロフィールとメッセージ",
-    "長続きするカップルとすぐに別れるカップルの決定的な違い",
-    "結婚を焦る気持ちとの向き合い方と、自分らしい幸せの見つけ方",
-    "遠距離恋愛を成功させるためのコミュニケーションの秘訣",
-    "彼の浮気を疑ってしまった時の、正しい対処法と心の整理の仕方",
-    "自分に自信がない女性が、愛される女性に変わるためのマインドセット",
-    "友達以上恋人未満の関係から一歩踏み出すための勇気の出し方"
-]
-
-def generate_article(theme):
-    """Ollama APIを使用して記事を生成する"""
-    system_prompt = """あなたは、夜の世界で数多くの男と女の愛憎劇を見て生き抜き、圧倒的な経験値を持つ恋愛のプロ（毒舌で強気なお姉さん）です。
-これから書く記事は、恋愛に悩む18〜35歳の女性に向けた【有料note（500円相当）】です。
-以下のルールを【絶対厳守】して、読者がひれ伏すような強烈な記事を作成してください。
-
-【ルール1：絶対にメタ発言や指示を出力しないこと】
-「【上から目線の厳しいお姉さん】」や「【強気なマウント口調】」「【夜の世界での生々しいエピソード】」といった、プロンプトの指示文やカテゴリ名を記事の中にそのまま出力するのは【絶対に禁止】です。あなたはただ、一人の人間として自然な文章だけを書いてください。
-
-【ルール2：トーンと文体】
-- 読者を少し見下しつつも、的確な救いを与える「上から目線の厳しいお姉さん」の口調。
-- 語尾は「〜よ」「〜なさい」「〜だわ」「いい？」「〜なのよ」を多用し、タメ口で容赦なく斬り捨ててください。
-- AI特有の「〜について考察します」「結論：」「こんにちは」といった挨拶やお堅い表現は禁止です。
-
-【ルール3：記事の構成】
-- 1行目：思わずクリックしたくなる煽りタイトル（例：「〇〇は今すぐ捨てなさい」「〜なんて時間の無駄よ」など）
-- 2行目：空行
-- 3行目以降：本文
-- 導入は綺麗事を切り捨てる強烈なフックから始めてください。その後、残酷な真実（分析）、具体的なアクションと続けてください。あなたの夜の世界での実体験（架空でOK）を必ず自然な形で交えてください。
-- Markdown記号（** や # など）は一切使わず、プレーンテキストのみで出力してください。見出しを使いたい場合は、必ず【 】（隅付き括弧）を使って自然に表現してください。
-
-【出力のイメージ（参考）】
-「いい人」を探すのは今すぐやめなさい。本当にあなたを幸せにする男の残酷な条件
-
-マッチングアプリを開けば、そこには「選ばれたい男」と「怯えている女」の群れ。
-でもね、夜の世界で何万という男の嘘と真実を飲み込み、自ら選別してきた私から言わせれば、あなたのその努力は9割が的外れよ。
-女が本当に探すべきなのは「無害な優男」じゃない。「自分をこの退屈な日常から連れ出してくれる、底の知れない男」なの。
-"""
-
-    prompt = f"今日の記事のテーマは「{theme}」です。上記のルールに従い、指示文や記号を一切含めない、プレーンテキストの自然な文章で5000文字以上の圧倒的なお悩み解決記事を執筆してください。"
-
+def call_ollama(system_prompt, prompt, timeout=1800, max_tokens=4096):
+    """Ollama APIを呼び出してテキストを生成する汎用関数"""
     payload = {
         "model": MODEL_NAME,
         "system": system_prompt,
         "prompt": prompt,
         "stream": False,
         "options": {
-            "num_predict": 4096,
+            "num_predict": max_tokens,
             "temperature": 0.7
         }
     }
-
-    print(f"[{theme}] の記事を生成中...")
-    start_time = time.time()
     
     try:
-        # qwen2.5:3bは重く、GitHubの無料サーバー(CPU)で長文を生成すると5分(300秒)以上かかるためタイムアウトを30分(1800秒)に延長
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=1800)
+        response = requests.post(OLLAMA_API_URL, json=payload, timeout=timeout)
         response.raise_for_status()
         result = response.json()
-        text = result.get("response", "")
-        
-        # Markdown記号を強制的に除去（AIが指示を無視した場合の保険）
-        text = text.replace('**', '').replace('__', '')
-        # #見出しを隅付き括弧に変換
-        lines = text.split('\n')
-        cleaned_lines = []
-        for line in lines:
-            if line.startswith('### '):
-                line = f"【{line.replace('### ', '').strip()}】"
-            elif line.startswith('## '):
-                line = f"【{line.replace('## ', '').strip()}】"
-            elif line.startswith('# '):
-                line = f"【{line.replace('# ', '').strip()}】"
-            cleaned_lines.append(line)
-        text = '\n'.join(cleaned_lines)
-        
-        elapsed_time = time.time() - start_time
-        print(f"生成完了 (所要時間: {elapsed_time:.1f}秒, 文字数: {len(text)}文字)")
-        
-        return text
+        return result.get("response", "").strip()
     except Exception as e:
-        print(f"記事生成中にエラーが発生しました: {e}")
-        return None
+        print(f"Ollama APIの呼び出し中にエラーが発生しました: {e}")
+        return ""
+
+def get_new_theme():
+    """過去のテーマを回避し、新しい恋愛相談テーマを生成する（ステップ0）"""
+    print("ステップ0：過去のテーマを回避して新規テーマを生成中...")
+    used_themes = []
+    if os.path.exists(THEMES_FILE):
+        try:
+            with open(THEMES_FILE, "r", encoding="utf-8") as f:
+                used_themes = json.load(f)
+        except Exception:
+            pass
+            
+    system_prompt = "あなたは優秀なコンテンツディレクターです。"
+    prompt = f"""
+18〜35歳の女性が真剣に悩む、リアルな「恋愛相談のテーマ（お悩み）」を1つだけ提案してください。
+ただし、以下の過去のテーマとは【絶対に被らない】ようにしてください。
+
+【過去のテーマリスト】
+{json.dumps(used_themes, ensure_ascii=False)}
+
+出力は、テーマの文章1行のみにしてください。
+（例：マッチングアプリで3回目のデートに繋がらない時の会話のコツ）
+"""
+    new_theme = call_ollama(system_prompt, prompt, timeout=300)
+    
+    if new_theme:
+        used_themes.append(new_theme)
+        with open(THEMES_FILE, "w", encoding="utf-8") as f:
+            json.dump(used_themes, f, ensure_ascii=False, indent=2)
+        return new_theme
+    else:
+        return "自分に自信がない女性が、愛される女性に変わるためのマインドセット"
+
+def generate_outline(theme):
+    """構成案（見出し）を作成する（ステップ1）"""
+    print("ステップ1：構成案（見出し）を作成中...")
+    system_prompt = "あなたは優秀な編集者です。メタ発言は絶対にせず、指定された形式で結果のみを出力してください。"
+    prompt = f"""
+以下のテーマで有料note（500円）の記事を書きます。
+テーマ：「{theme}」
+
+この記事の論理的で魅力的な見出し（H2）を4つ作成してください。
+構成は以下の流れにしてください。
+1. 読者の痛みの代弁と問題提起（導入）
+2. 残酷だけど知るべき心理や真実（分析）
+3. 今日からできる具体的なアクションや考え方（実践）
+4. まとめと救いの言葉（結論）
+
+以下の形式で出力してください。
+見出し1: （テキスト）
+見出し2: （テキスト）
+見出し3: （テキスト）
+見出し4: （テキスト）
+"""
+    return call_ollama(system_prompt, prompt, timeout=300)
+
+def optimize_title(theme, outline):
+    """SEOを意識しつつエッジの効いたタイトルを作成する（ステップ2）"""
+    print("ステップ2：タイトルと構成のブラッシュアップ中...")
+    system_prompt = "あなたは天才的なWebライターです。メタ発言は一切せず、タイトルのみを出力してください。"
+    prompt = f"""
+以下のテーマと構成で有料note記事を書きます。
+
+【テーマ】
+{theme}
+【構成】
+{outline}
+
+この記事が思わずクリックしたくなるような、強烈でエッジの効いたタイトルを1つだけ提案してください。
+【条件】
+- SEOとSNSの拡散を意識し、30〜40文字程度にすること。
+- 「〇〇は今すぐ捨てなさい」「〜の残酷な真実」など、読者の常識を覆す煽り文句を入れること。
+- 出力はタイトルのテキスト1行のみ。
+"""
+    title = call_ollama(system_prompt, prompt, timeout=300)
+    title = title.replace("タイトル：", "").replace("タイトル:", "").strip('「」"\'')
+    return title
+
+def write_section(title, outline, section_name, is_intro=False):
+    """見出しごとに記事を執筆する（ステップ3）"""
+    print(f"ステップ3：見出し「{section_name}」の執筆中...")
+    
+    system_prompt = """あなたは、夜の世界のリアルを知るからこそ、傷ついた女性に深く寄り添い、優しくも的確に導いてくれる「頼れるお姉さん（恋愛コンサルタント）」です。
+
+【絶対厳守ルール】
+1. メタ発言の禁止：「【上から目線の〜】」「【寄り添い型】」といった指示文や、Markdown記号（** や #）は【絶対に出力しないでください】。
+2. ペルソナ：夜の世界で多くの男女を見てきた経験を活かし、毒舌すぎず、説得力と包容力を持った口調（「〜だよね」「〜してみて」「いい？」「〜なのよ」）で話してください。
+3. 構成：あなたの夜の世界での実体験や失敗談（架空でOK）を必ず自然な形で交えてください。
+"""
+    
+    intro_instruction = """
+あなたは記事の【導入（冒頭）】部分を書いています。
+読者の甘い考えや綺麗事を優しくもバッサリと切り捨てる「強烈なフック」から始め、一気に読者の心臓を掴んでください。
+見出しのタイトルは書かず、いきなり本文から書き始めてください。
+""" if is_intro else f"""
+あなたは記事の【{section_name}】という見出しの部分を書いています。
+見出しのタイトル（【{section_name}】）を最初に1行書き、その次の行から本文を書いてください。
+"""
+
+    prompt = f"""
+記事タイトル：{title}
+全体構成：
+{outline}
+
+上記の情報を踏まえ、以下の指示に従って執筆してください。
+{intro_instruction}
+
+文字数は可能な限り長く、詳細に、情景や感情を描写して、1000文字以上の読み応えのある長文にしてください。
+"""
+    return call_ollama(system_prompt, prompt, timeout=600)
+
+def refine_article(draft):
+    """違和感の修正と表現の強化（ステップ4）"""
+    print("ステップ4：表現の違和感チェックとトーン統一中...")
+    system_prompt = "あなたは優秀な校正者です。メタ発言はせず、修正後の文章のみを出力してください。"
+    prompt = f"""
+以下の恋愛相談記事のドラフトを校正してください。
+
+【校正ルール】
+1. 意味不明な文章、不自然な英単語の混ざり、AI特有の堅苦しい表現（「結論：」「〜について考察します」「こんにちは」）を削除・修正してください。
+2. 「【上から目線】」「【夜の世界での生々しいエピソード】」など、プロンプトの指示文がそのまま漏洩している部分があれば完全に削除してください。
+3. Markdown記号（** や # や __）はすべて削除し、プレーンテキストにしてください。
+4. 全体のトーンを「夜の世界を知る頼れるお姉さん（タメ口、〜だよね、〜なのよ）」に統一してください。
+
+【ドラフト】
+{draft}
+"""
+    if len(draft) > 6000:
+        return draft.replace('**', '').replace('__', '')
+        
+    refined = call_ollama(system_prompt, prompt, timeout=900)
+    refined = refined.replace('**', '').replace('__', '').replace('### ', '【').replace('## ', '【').replace('# ', '【')
+    return refined
 
 def post_to_note_via_playwright(title, content):
-    """Playwrightを使ってnoteにログインし、記事を投稿する"""
-    print("noteへの自動投稿プロセスを開始します...")
+    """Playwrightを使ってnoteに下書き保存する（ステップ5）"""
+    if not NOTE_EMAIL or not NOTE_PASSWORD:
+        print("エラー: NOTE_EMAIL または NOTE_PASSWORD が設定されていません。")
+        return False
+
+    print("ステップ5：noteへの自動入力（下書き保存）プロセスを開始します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
-            viewport={'width': 1440, 'height': 900}, # PC版の広い画面サイズを強制
+            viewport={'width': 1440, 'height': 900},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         
-        # Cookieを利用したログイン回避
         if NOTE_COOKIES:
             print("Cookieを利用してログイン状態を復元します...")
             try:
@@ -122,48 +189,36 @@ def post_to_note_via_playwright(title, content):
                 print("Cookieの読み込みに成功しました。")
             except Exception as e:
                 print(f"Cookieの形式が不正です: {e}")
-        elif not NOTE_EMAIL or not NOTE_PASSWORD:
-            print("エラー: ログイン情報（Cookie または EMAIL/PASSWORD）が設定されていません。")
-            return False
-
+        else:
+            print("Cookieが設定されていません。EMAIL/PASSWORDでのログインを試みます。")
+            
         page = context.new_page()
         
         try:
             if not NOTE_COOKIES:
-                print("ログインページへアクセス中...")
                 page.goto("https://note.com/login", wait_until="load")
                 time.sleep(2)
-                
-                print("ログイン情報を入力中...")
                 page.fill('#email', NOTE_EMAIL)
                 page.fill('#password', NOTE_PASSWORD)
-                
                 login_btn = page.locator('.o-login__button button')
                 login_btn.wait_for(state="visible")
                 page.wait_for_timeout(1000)
                 login_btn.click(force=True)
-                
-                print("ログイン完了を待機中...")
                 try:
                     page.wait_for_url(lambda url: "login" not in url, timeout=10000)
                 except Exception:
                     pass 
-                    
                 time.sleep(3)
-                page.screenshot(path="step1_after_login.png", full_page=True)
-                
                 if "login" in page.url:
-                    print("エラー: ログイン画面から遷移していません。認証失敗かBot検知の可能性があります。")
+                    print("エラー: ログイン画面から遷移していません。")
                     return False
 
             print("記事作成ページへアクセス中...")
             page.goto("https://note.com/intent/post", wait_until="load")
             time.sleep(5)
-            page.screenshot(path="step2_editor_loaded.png", full_page=True)
             
-            # 未ログイン状態でリダイレクトされていないかチェック
             if "login" in page.url:
-                print("エラー: 未ログイン状態と判定されログイン画面にリダイレクトされました。Cookieが期限切れか不正です。")
+                print("エラー: 未ログイン状態と判定されログイン画面にリダイレクトされました。")
                 return False
 
             print("タイトルと本文を入力中...")
@@ -186,35 +241,62 @@ def post_to_note_via_playwright(title, content):
             
             print("記事の入力が完了しました。")
             
-            # noteの自動保存（下書き保存）が確実に走るように長めに待機
             print("noteのオートセーブ（下書き保存）を待機しています（15秒）...")
             time.sleep(15)
-            page.screenshot(path="step4_draft_saved.png", full_page=True)
+            page.screenshot(path="step5_draft_saved.png", full_page=True)
             print("下書きの保存が完了しました！ブラウザを終了します。")
 
         except Exception as e:
             print(f"Playwright操作中にエラーが発生しました: {e}")
             try:
                 page.screenshot(path="error_screenshot.png", full_page=True)
-                print("エラー発生時のスクリーンショットを保存しました。")
-            except Exception as ss_e:
-                print(f"スクリーンショットの保存にも失敗しました: {ss_e}")
+            except:
+                pass
         finally:
             browser.close()
 
 def main():
-    theme = random.choice(THEMES)
+    print("=== 記事自動生成パイプライン開始 ===")
     
-    full_text = generate_article(theme)
-    if not full_text:
-        return
+    # ステップ0: テーマ生成
+    theme = get_new_theme()
+    print(f"決定したテーマ: {theme}\n")
+    
+    # ステップ1: 構成案作成
+    outline = generate_outline(theme)
+    print(f"構成案:\n{outline}\n")
+    
+    # ステップ2: タイトル作成
+    title = optimize_title(theme, outline)
+    print(f"最適化されたタイトル: {title}\n")
+    
+    # 見出しの抽出
+    sections = []
+    for line in outline.split('\n'):
+        if line.startswith('見出し'):
+            sections.append(line.split(':', 1)[-1].strip())
+            
+    if not sections:
+        sections = ["導入", "心理分析", "具体的なアクション", "まとめ"]
         
-    lines = full_text.strip().split('\n')
-    title = lines[0].strip('#').strip()
-    content = '\n'.join(lines[1:]).strip()
+    # ステップ3: 見出しごとの個別執筆
+    full_draft_parts = []
+    for i, section in enumerate(sections):
+        is_intro = (i == 0)
+        part = write_section(title, outline, section, is_intro)
+        full_draft_parts.append(part)
+        print(f"--- 見出し {i+1} 完了 ---")
+        
+    full_draft = "\n\n".join(full_draft_parts)
     
-    # Playwrightで直接投稿
-    post_to_note_via_playwright(title, content)
+    # ステップ4: 違和感修正
+    final_content = refine_article(full_draft)
+    print(f"最終文字数: {len(final_content)}文字\n")
+    
+    # ステップ5: noteへ下書き保存
+    post_to_note_via_playwright(title, final_content)
+    
+    print("=== 全プロセス完了 ===")
 
 if __name__ == "__main__":
     main()
