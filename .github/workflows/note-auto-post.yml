@@ -34,7 +34,7 @@ jobs:
           sleep 10
           
       - name: Pull LLM Model
-        run: ollama pull gemma2:2b
+        run: ollama pull qwen2.5:3b
 
       - name: Run Python Script
         env:

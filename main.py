@@ -10,7 +10,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/generate"
 NOTE_EMAIL = os.environ.get("NOTE_EMAIL")
 NOTE_PASSWORD = os.environ.get("NOTE_PASSWORD")
 NOTE_COOKIES = os.environ.get("NOTE_COOKIES")
-MODEL_NAME = "gemma2:2b"
+MODEL_NAME = "qwen2.5:3b"
 
 # ランダムなテーマのリスト
 THEMES = [
@@ -31,20 +31,31 @@ THEMES = [
 def generate_article(theme):
     """Ollama APIを使用して記事を生成する"""
     system_prompt = """あなたは、恋愛に悩む18〜35歳の女性に向けた恋愛アドバイザーです。
-以下のキャラクター設定を守って記事を書いてください。
 
 【キャラクター設定・語り口】
-- 読者にとって「頼れる年上のお姉さん」の立ち位置。威厳を保ちつつも、少しラフで親しみやすい口調（「〜だよね」「〜してみて！」「〜だと思うな」など、タメ口や親身な表現を交えた話し方）。
-- AI特有の「〜するのがいいかもしれません」「〜という側面もあります」「〜と言えるでしょう」といった回りくどい表現や、自信のない曖昧な表現は【絶対に】使わないこと。ズバッと断定し、頼りがいのあるアドバイスをしてください。
-- 実体験（架空でOK）を交えつつ、具体的な解決策を提案してください。
+- 「頼れる年上のお姉さん」の立ち位置。威厳を保ちつつも、少しラフで親しみやすい口調（「〜だよね」「〜してみて！」「〜だと思うな」など）。
+- 「〜するのがいいかもしれません」「〜という側面もあります」といった回りくどい表現や、不自然な英単語交じりの文章は絶対に禁止です。ズバッと断定し、自然な日本語で話してください。
+- 自身のリアルな体験談（架空でOK）を必ず交えてください。
 
-【記事の要件】
-- 文字数は必ず【最低でも5000文字以上】の長文にすること。非常に詳細に語ってください。
-- noteのエディタに直接テキストを入力するため、Markdown形式（**太字** や # 見出し など）は【一切使用禁止】です。強調したい場所は「」を使ったり、見出しは【 】（隅付き括弧）を使うなど、プレーンテキストのみで読みやすい構成にしてください。
-- 最初の行は記事の「タイトル」として1行だけで書き、次の行から本文を書き始めてください。
+【記事の要件とフォーマット】
+- 文字数は必ず【5000文字以上の長文】にすること。
+- Markdown記号（**太字** や # 見出し など）は【一切使用禁止】です。
+- 見出しが必要な場合は、必ず【見出しテキスト】のように隅付き括弧だけを使ってください。
+- 文章の構成は以下の順番で書いてください：
+
+（ここにタイトルを1行で書く）
+（1行空ける）
+【はじめに】
+（導入の文章）
+【具体的なアドバイス1】
+（本文と体験談）
+【具体的なアドバイス2】
+（本文と体験談）
+【最後に】
+（まとめの文章）
 """
 
-    prompt = f"今日の記事のテーマは「{theme}」です。このテーマについて、読者の心に響く、5000文字以上の充実したお悩み解決記事を執筆してください。"
+    prompt = f"今日の記事のテーマは「{theme}」です。上記のフォーマットとキャラクター設定に従い、読者の心に響く、5000文字以上の充実したお悩み解決記事をプレーンテキストで執筆してください。"
 
     payload = {
         "model": MODEL_NAME,
@@ -65,6 +76,21 @@ def generate_article(theme):
         response.raise_for_status()
         result = response.json()
         text = result.get("response", "")
+        
+        # Markdown記号を強制的に除去（AIが指示を無視した場合の保険）
+        text = text.replace('**', '').replace('__', '')
+        # #見出しを隅付き括弧に変換
+        lines = text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            if line.startswith('### '):
+                line = f"【{line.replace('### ', '').strip()}】"
+            elif line.startswith('## '):
+                line = f"【{line.replace('## ', '').strip()}】"
+            elif line.startswith('# '):
+                line = f"【{line.replace('# ', '').strip()}】"
+            cleaned_lines.append(line)
+        text = '\n'.join(cleaned_lines)
         
         elapsed_time = time.time() - start_time
         print(f"生成完了 (所要時間: {elapsed_time:.1f}秒, 文字数: {len(text)}文字)")
