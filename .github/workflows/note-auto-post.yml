@@ -1,0 +1,41 @@
+name: Auto Post to Note
+
+on:
+  schedule:
+    # 毎日 日本時間の20:00 (UTCの11:00) に実行
+    - cron: '0 11 * * *'
+  workflow_dispatch: # 手動実行用トリガー
+
+jobs:
+  generate-and-post:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Start Ollama Server
+        run: |
+          ollama serve &
+          # サーバーが立ち上がるまで少し待機
+          sleep 10
+          
+      - name: Pull LLM Model
+        run: ollama pull gemma2:2b
+
+      - name: Run Python Script
+        env:
+          MAKE_WEBHOOK_URL: ${{ secrets.MAKE_WEBHOOK_URL }}
+        run: python main.py
