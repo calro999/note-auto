@@ -81,6 +81,7 @@ def post_to_note_via_playwright(title, content):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
+            viewport={'width': 1440, 'height': 900}, # PC版の広い画面サイズを強制
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         
@@ -159,20 +160,30 @@ def post_to_note_via_playwright(title, content):
             page.screenshot(path="step3_after_typing.png", full_page=True)
             
             print("公開ボタンを押下中...")
-            publish_settings_btn = page.locator('button:has-text("公開設定"), button[data-name="publish"]')
+            # スクロールを一番上に戻す（ボタンがヘッダーにある場合を考慮）
+            page.evaluate("window.scrollTo(0, 0)")
+            time.sleep(1)
+            
+            # ボタン名が「公開設定」「公開」「投稿する」などのパターンに広く対応
+            publish_settings_btn = page.locator('text="公開設定", text="公開する", text="公開", text="投稿する"').locator('visible=true').first
+            
             if publish_settings_btn.count() > 0:
-                publish_settings_btn.first.click()
-                time.sleep(2)
+                publish_settings_btn.click(force=True)
+                time.sleep(3)
                 page.screenshot(path="step4_publish_settings.png", full_page=True)
                 
-                submit_btn = page.locator('button:has-text("投稿する"), button:has-text("公開"), button[data-name="publish-submit"]').last
-                submit_btn.click()
-                print("noteへの投稿完了ボタンを押しました！")
+                # パネルの中の最終確認ボタン
+                submit_btn = page.locator('button:has-text("投稿する"), button:has-text("公開"), text="今すぐ投稿"').locator('visible=true').last
+                if submit_btn.count() > 0:
+                    submit_btn.click(force=True)
+                    print("noteへの投稿完了ボタンを押しました！")
+                else:
+                    print("最終確認の投稿ボタンが見つかりませんでした。")
                 
                 time.sleep(5)
                 page.screenshot(path="step5_after_publish.png", full_page=True)
             else:
-                print("公開設定ボタンが見つかりませんでした。画面の状態を確認してください。")
+                print("最初の公開設定ボタンが見つかりませんでした。画面の状態を確認してください。")
 
         except Exception as e:
             print(f"Playwright操作中にエラーが発生しました: {e}")
