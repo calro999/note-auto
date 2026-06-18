@@ -2,12 +2,14 @@ import os
 import random
 import requests
 import time
+import json
 from playwright.sync_api import sync_playwright
 
 # --- 設定 ---
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 NOTE_EMAIL = os.environ.get("NOTE_EMAIL")
 NOTE_PASSWORD = os.environ.get("NOTE_PASSWORD")
+NOTE_COOKIES = os.environ.get("NOTE_COOKIES")
 MODEL_NAME = "gemma2:2b"
 
 # ランダムなテーマのリスト
@@ -75,50 +77,66 @@ def generate_article(theme):
 
 def post_to_note_via_playwright(title, content):
     """Playwrightを使ってnoteにログインし、記事を投稿する"""
-    if not NOTE_EMAIL or not NOTE_PASSWORD:
-        print("エラー: NOTE_EMAIL または NOTE_PASSWORD が設定されていません。")
-        return False
-
     print("noteへの自動投稿プロセスを開始します...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
+        
+        # Cookieを利用したログイン回避
+        if NOTE_COOKIES:
+            print("Cookieを利用してログイン状態を復元します...")
+            try:
+                cookies = json.loads(NOTE_COOKIES)
+                context.add_cookies(cookies)
+                print("Cookieの読み込みに成功しました。")
+            except Exception as e:
+                print(f"Cookieの形式が不正です: {e}")
+        elif not NOTE_EMAIL or not NOTE_PASSWORD:
+            print("エラー: ログイン情報（Cookie または EMAIL/PASSWORD）が設定されていません。")
+            return False
+
         page = context.new_page()
         
         try:
-            print("ログインページへアクセス中...")
-            page.goto("https://note.com/login", wait_until="load")
-            time.sleep(2)
-            
-            print("ログイン情報を入力中...")
-            page.fill('#email', NOTE_EMAIL)
-            page.fill('#password', NOTE_PASSWORD)
-            
-            login_btn = page.locator('.o-login__button button')
-            login_btn.wait_for(state="visible")
-            page.wait_for_timeout(1000)
-            login_btn.click(force=True)
-            
-            print("ログイン完了を待機中...")
-            try:
-                page.wait_for_url(lambda url: "login" not in url, timeout=10000)
-            except Exception:
-                pass 
+            if not NOTE_COOKIES:
+                print("ログインページへアクセス中...")
+                page.goto("https://note.com/login", wait_until="load")
+                time.sleep(2)
                 
-            time.sleep(3)
-            page.screenshot(path="step1_after_login.png", full_page=True)
-            
-            if "login" in page.url:
-                print("エラー: ログイン画面から遷移していません。認証失敗かBot検知の可能性があります。")
-                return False
+                print("ログイン情報を入力中...")
+                page.fill('#email', NOTE_EMAIL)
+                page.fill('#password', NOTE_PASSWORD)
+                
+                login_btn = page.locator('.o-login__button button')
+                login_btn.wait_for(state="visible")
+                page.wait_for_timeout(1000)
+                login_btn.click(force=True)
+                
+                print("ログイン完了を待機中...")
+                try:
+                    page.wait_for_url(lambda url: "login" not in url, timeout=10000)
+                except Exception:
+                    pass 
+                    
+                time.sleep(3)
+                page.screenshot(path="step1_after_login.png", full_page=True)
+                
+                if "login" in page.url:
+                    print("エラー: ログイン画面から遷移していません。認証失敗かBot検知の可能性があります。")
+                    return False
 
             print("記事作成ページへアクセス中...")
             page.goto("https://note.com/intent/post", wait_until="load")
             time.sleep(5)
             page.screenshot(path="step2_editor_loaded.png", full_page=True)
             
+            # 未ログイン状態でリダイレクトされていないかチェック
+            if "login" in page.url:
+                print("エラー: 未ログイン状態と判定されログイン画面にリダイレクトされました。Cookieが期限切れか不正です。")
+                return False
+
             print("タイトルと本文を入力中...")
             title_input = page.locator('textarea[placeholder*="タイトル"], .editor-titleInput')
             if title_input.count() > 0:
