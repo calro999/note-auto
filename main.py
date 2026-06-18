@@ -89,8 +89,8 @@ def post_to_note_via_playwright(title, content):
         
         try:
             print("ログインページへアクセス中...")
-            page.goto("https://note.com/login")
-            page.wait_for_load_state("networkidle")
+            page.goto("https://note.com/login", wait_until="load")
+            time.sleep(2)
             
             print("ログイン情報を入力中...")
             page.fill('#email', NOTE_EMAIL)
@@ -102,25 +102,22 @@ def post_to_note_via_playwright(title, content):
             login_btn.click(force=True)
             
             print("ログイン完了を待機中...")
-            # URLがloginページから変わるか、5秒経過するまで待機
             try:
                 page.wait_for_url(lambda url: "login" not in url, timeout=10000)
             except Exception:
-                pass # タイムアウトしてもとりあえず次へ進む（エラーハンドリングは後で）
+                pass 
                 
-            page.wait_for_load_state("networkidle")
-            time.sleep(2)
-            page.screenshot(path="step1_after_login.png") # デバッグ用スクショ
+            time.sleep(3)
+            page.screenshot(path="step1_after_login.png", full_page=True)
             
             if "login" in page.url:
                 print("エラー: ログイン画面から遷移していません。認証失敗かBot検知の可能性があります。")
                 return False
 
             print("記事作成ページへアクセス中...")
-            page.goto("https://note.com/intent/post")
-            page.wait_for_load_state("networkidle")
-            time.sleep(3)
-            page.screenshot(path="step2_editor_loaded.png") # デバッグ用スクショ
+            page.goto("https://note.com/intent/post", wait_until="load")
+            time.sleep(5)
+            page.screenshot(path="step2_editor_loaded.png", full_page=True)
             
             print("タイトルと本文を入力中...")
             title_input = page.locator('textarea[placeholder*="タイトル"], .editor-titleInput')
@@ -141,29 +138,31 @@ def post_to_note_via_playwright(title, content):
                 page.keyboard.insert_text(content)
             
             time.sleep(3)
-            page.screenshot(path="step3_after_typing.png") # デバッグ用スクショ
+            page.screenshot(path="step3_after_typing.png", full_page=True)
             
             print("公開ボタンを押下中...")
-            # noteのエディタの「公開設定」ボタンのセレクタ（idやクラスを幅広く拾う）
             publish_settings_btn = page.locator('button:has-text("公開設定"), button[data-name="publish"]')
             if publish_settings_btn.count() > 0:
                 publish_settings_btn.first.click()
                 time.sleep(2)
-                page.screenshot(path="step4_publish_settings.png") # デバッグ用スクショ
+                page.screenshot(path="step4_publish_settings.png", full_page=True)
                 
                 submit_btn = page.locator('button:has-text("投稿する"), button:has-text("公開"), button[data-name="publish-submit"]').last
                 submit_btn.click()
                 print("noteへの投稿完了ボタンを押しました！")
                 
                 time.sleep(5)
-                page.screenshot(path="step5_after_publish.png") # デバッグ用スクショ
+                page.screenshot(path="step5_after_publish.png", full_page=True)
             else:
                 print("公開設定ボタンが見つかりませんでした。画面の状態を確認してください。")
 
         except Exception as e:
             print(f"Playwright操作中にエラーが発生しました: {e}")
-            page.screenshot(path="error_screenshot.png")
-            print("エラー発生時のスクリーンショットを保存しました。")
+            try:
+                page.screenshot(path="error_screenshot.png", full_page=True)
+                print("エラー発生時のスクリーンショットを保存しました。")
+            except Exception as ss_e:
+                print(f"スクリーンショットの保存にも失敗しました: {ss_e}")
         finally:
             browser.close()
 
