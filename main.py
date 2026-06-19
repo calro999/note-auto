@@ -5,17 +5,44 @@ import time
 from playwright.sync_api import sync_playwright
 
 # --- 設定 ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 NOTE_EMAIL = os.environ.get("NOTE_EMAIL")
 NOTE_PASSWORD = os.environ.get("NOTE_PASSWORD")
 NOTE_COOKIES = os.environ.get("NOTE_COOKIES")
-MODEL_NAME = "qwen2.5:3b"
+OLLAMA_MODEL_NAME = "qwen2.5:3b"
 THEMES_FILE = "used_themes.json"
+
+def call_gemini(system_prompt, prompt, timeout=60):
+    """Gemini APIを呼び出す関数"""
+    if not GEMINI_API_KEY:
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [{
+            "parts": [{"text": prompt}]
+        }],
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 4000
+        }
+    }
+    headers = {"Content-Type": "application/json"}
+    response = requests.post(url, json=payload, headers=headers, timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except (KeyError, IndexError):
+        return None
 
 def call_ollama(system_prompt, prompt, timeout=1800, max_tokens=4096):
     """Ollama APIを呼び出してテキストを生成する汎用関数"""
     payload = {
-        "model": MODEL_NAME,
+        "model": OLLAMA_MODEL_NAME,
         "system": system_prompt,
         "prompt": prompt,
         "stream": False,
@@ -24,14 +51,27 @@ def call_ollama(system_prompt, prompt, timeout=1800, max_tokens=4096):
             "temperature": 0.7
         }
     }
-    
+    response = requests.post(OLLAMA_API_URL, json=payload, timeout=timeout)
+    response.raise_for_status()
+    result = response.json()
+    return result.get("response", "").strip()
+
+def call_ai(system_prompt, prompt, timeout=1800):
+    """Geminiを優先し、失敗したらOllamaにフォールバックする関数"""
     try:
-        response = requests.post(OLLAMA_API_URL, json=payload, timeout=timeout)
-        response.raise_for_status()
-        result = response.json()
-        return result.get("response", "").strip()
+        if GEMINI_API_KEY:
+            print("  -> Gemini APIを使用中...")
+            result = call_gemini(system_prompt, prompt, timeout=60)
+            if result:
+                return result
     except Exception as e:
-        print(f"Ollama APIの呼び出し中にエラーが発生しました: {e}")
+        print(f"  -> Gemini APIでエラー発生: {e}")
+        
+    print("  -> Ollama (ローカル) にフォールバックします...")
+    try:
+        return call_ollama(system_prompt, prompt, timeout=timeout)
+    except Exception as e:
+        print(f"  -> Ollama APIの呼び出し中にもエラーが発生しました: {e}")
         return ""
 
 def get_new_theme():
@@ -56,7 +96,7 @@ def get_new_theme():
 出力は、テーマの文章1行のみにしてください。
 （例：マッチングアプリで3回目のデートに繋がらない時の会話のコツ）
 """
-    new_theme = call_ollama(system_prompt, prompt, timeout=300)
+    new_theme = call_ai(system_prompt, prompt, timeout=300)
     
     if new_theme:
         used_themes.append(new_theme)
@@ -87,7 +127,7 @@ def generate_outline(theme):
 見出し3: （テキスト）
 見出し4: （テキスト）
 """
-    return call_ollama(system_prompt, prompt, timeout=300)
+    return call_ai(system_prompt, prompt, timeout=300)
 
 def optimize_title(theme, outline):
     """SEOを意識しつつエッジの効いたタイトルを作成する（ステップ2）"""
@@ -107,7 +147,7 @@ def optimize_title(theme, outline):
 - 「〇〇は今すぐ捨てなさい」「〜の残酷な真実」など、読者の常識を覆す煽り文句を入れること。
 - 出力はタイトルのテキスト1行のみ。
 """
-    title = call_ollama(system_prompt, prompt, timeout=300)
+    title = call_ai(system_prompt, prompt, timeout=300)
     title = title.replace("タイトル：", "").replace("タイトル:", "").strip('「」"\'')
     return title
 
@@ -139,7 +179,7 @@ def write_section(title, outline, section_name, is_intro=False):
 あなたの過去の恋愛での失敗談や、夜の世界で見てきた実体験（架空でOK）を必ず交えて、読者に刺さるように深く語ってください。
 文字数は1000文字以上を目指し、詳細に情景や感情を描写してください。
 """
-    return call_ollama(system_prompt, prompt, timeout=600)
+    return call_ai(system_prompt, prompt, timeout=600)
 
 def refine_article(draft):
     """違和感の修正と表現の強化（ステップ4）"""
@@ -168,7 +208,7 @@ def refine_article(draft):
         # ドラフトが長すぎる場合はAI校正をスキップし、Pythonの置換のみにする（LLMの破壊を防ぐ）
         refined = draft
     else:
-        refined = call_ollama(system_prompt, prompt, timeout=900)
+        refined = call_ai(system_prompt, prompt, timeout=900)
     
     # 最終的なPythonクリーンアップ
     refined = refined.replace('**', '').replace('__', '')
